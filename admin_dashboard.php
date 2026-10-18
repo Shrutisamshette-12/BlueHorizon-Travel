@@ -23,6 +23,34 @@ $totalBookings = $conn->query("SELECT * FROM bookings")->num_rows;
 $usersResult = $conn->query("SELECT * FROM users");
 $bookingsResult = $conn->query("SELECT * FROM bookings ORDER BY date DESC");
 $summaryResult = $conn->query("SELECT place, COUNT(*) AS total FROM bookings GROUP BY place");
+include("packages.php");
+
+// ---- Analytics ----
+$revenueByPlace  = [];
+$guestsByPlace   = [];
+$bookingsByPlace = [];
+foreach ($packages as $name => $p) {
+    $revenueByPlace[$name]  = 0;
+    $guestsByPlace[$name]   = 0;
+    $bookingsByPlace[$name] = 0;
+}
+
+$monthly = [];
+$allBookings = $conn->query("SELECT place, guests, date FROM bookings");
+while ($b = $allBookings->fetch_assoc()) {
+    $key = ucfirst(strtolower(trim($b['place'])));
+    if (!isset($packages[$key])) continue;   // skip old test data that is not one of the 6 packages
+    $g = max(1, (int)$b['guests']);
+    $bookingsByPlace[$key]++;
+    $guestsByPlace[$key]  += $g;
+    $revenueByPlace[$key] += $g * $packages[$key]['price'];
+    $month = substr($b['date'], 0, 7);       // example: 2026-05
+    $monthly[$month] = ($monthly[$month] ?? 0) + 1;
+}
+ksort($monthly);
+
+$totalRevenue = array_sum($revenueByPlace);
+$topPlace = max($bookingsByPlace) > 0 ? array_search(max($bookingsByPlace), $bookingsByPlace) : "-";
 ?>
 
 <!DOCTYPE html>
@@ -166,6 +194,33 @@ tr:hover{
     color:darkred;
 }
 
+/* CHARTS */
+.charts{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+    gap:20px;
+    margin-top:25px;
+}
+
+.chart-box{
+    background:#fff;
+    border-radius:15px;
+    padding:20px;
+    box-shadow:0 8px 20px rgba(0,0,0,0.08);
+}
+
+.chart-box h3{
+    font-size:16px;
+    margin-bottom:12px;
+    color:#333;
+}
+
+.note{
+    margin-top:8px;
+    font-size:12px;
+    color:#888;
+}
+
 h1{margin-bottom:20px;}
 h2{margin-top:30px;}
 
@@ -189,13 +244,32 @@ h2{margin-top:30px;}
 <!-- MAIN -->
 <div class="main">
 
-    <h1>Welcome Admin: <?php echo $_SESSION['admin']; ?> 👋</h1>
+    <h1>Welcome Admin: <?php echo htmlspecialchars($_SESSION['admin']); ?> 👋</h1>
 
     <!-- CARDS -->
     <div class="cards">
         <div class="card">👤 Total Users <br><strong><?php echo $totalUsers; ?></strong></div>
         <div class="card">📦 Total Bookings <br><strong><?php echo $totalBookings; ?></strong></div>
+        <div class="card">💰 Total Revenue <br><strong>₹<?php echo number_format($totalRevenue); ?></strong></div>
+        <div class="card">🏆 Top Destination <br><strong><?php echo htmlspecialchars($topPlace); ?></strong></div>
     </div>
+
+    <!-- CHARTS -->
+    <div class="charts">
+        <div class="chart-box">
+            <h3>📍 Bookings per Destination</h3>
+            <canvas id="bookingsChart"></canvas>
+        </div>
+        <div class="chart-box">
+            <h3>💰 Revenue per Destination (₹)</h3>
+            <canvas id="revenueChart"></canvas>
+        </div>
+        <div class="chart-box">
+            <h3>📅 Bookings per Month</h3>
+            <canvas id="monthChart"></canvas>
+        </div>
+    </div>
+    <p class="note">Revenue = number of guests × current package price. Only the 6 listed packages are counted.</p>
 
     <!-- SUMMARY -->
     <h2>📊 Bookings Summary</h2>
@@ -203,7 +277,7 @@ h2{margin-top:30px;}
         <tr><th>Place</th><th>Total Bookings</th></tr>
         <?php while($row = $summaryResult->fetch_assoc()): ?>
         <tr>
-            <td><?php echo $row['place']; ?></td>
+            <td><?php echo htmlspecialchars($row['place']); ?></td>
             <td><?php echo $row['total']; ?></td>
         </tr>
         <?php endwhile; ?>
@@ -216,8 +290,8 @@ h2{margin-top:30px;}
         <?php while($row = $usersResult->fetch_assoc()): ?>
         <tr>
             <td><?php echo $row['id']; ?></td>
-            <td><?php echo $row['username']; ?></td>
-            <td><?php echo $row['email']; ?></td>
+            <td><?php echo htmlspecialchars($row['username']); ?></td>
+            <td><?php echo htmlspecialchars($row['email']); ?></td>
             <td>
                 <a class="delete" href="admin_dashboard.php?delete_user=<?php echo $row['id']; ?>" onclick="return confirm('Delete this user?')">Delete</a>
             </td>
@@ -258,8 +332,8 @@ h2{margin-top:30px;}
         ?>
         <tr>
             <td><?php echo $row['id']; ?></td>
-            <td><?php echo $row['username']; ?></td>
-            <td><?php echo $row['place']; ?></td>
+            <td><?php echo htmlspecialchars($row['username']); ?></td>
+            <td><?php echo htmlspecialchars($row['place']); ?></td>
             <td><?php echo $row['date']; ?></td>
 
             <td class="<?php echo $class; ?>">
@@ -270,6 +344,34 @@ h2{margin-top:30px;}
     </table>
 
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const labels   = <?php echo json_encode(array_keys($packages)); ?>;
+const bookings = <?php echo json_encode(array_values($bookingsByPlace)); ?>;
+const revenue  = <?php echo json_encode(array_values($revenueByPlace)); ?>;
+const monthLabels = <?php echo json_encode(array_keys($monthly)); ?>;
+const monthData   = <?php echo json_encode(array_values($monthly)); ?>;
+
+const colors = ['#ff8c00','#ff5722','#2c2c54','#4caf50','#03a9f4','#9c27b0'];
+
+new Chart(document.getElementById('bookingsChart'), {
+    type: 'bar',
+    data: { labels: labels, datasets: [{ label: 'Bookings', data: bookings, backgroundColor: colors }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+});
+
+new Chart(document.getElementById('revenueChart'), {
+    type: 'doughnut',
+    data: { labels: labels, datasets: [{ data: revenue, backgroundColor: colors }] }
+});
+
+new Chart(document.getElementById('monthChart'), {
+    type: 'line',
+    data: { labels: monthLabels, datasets: [{ label: 'Bookings', data: monthData, borderColor: '#ff8c00', backgroundColor: 'rgba(255,140,0,0.15)', fill: true, tension: 0.3 }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+});
+</script>
 
 </body>
 </html>
