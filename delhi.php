@@ -238,7 +238,7 @@ body{
     <p><b>Day 3:</b> Lotus Temple & Akshardham</p>
     <p><b>Day 4:</b> Shopping & Departure</p>
 </div>
-
+<?php include 'itinerary_widget.php'; ?>
 <div class="map">
 <iframe
 src="https://maps.google.com/maps?q=Delhi&t=&z=13&ie=UTF8&iwloc=&output=embed"

@@ -219,6 +219,7 @@ body{
 </div>
 
 <!-- MAP -->
+<?php include 'itinerary_widget.php'; ?>
 <div class="map">
 <iframe src="https://maps.google.com/maps?q=udaipur&t=&z=13&ie=UTF8&iwloc=&output=embed"
 width="100%" height="300"></iframe>
